@@ -25,6 +25,9 @@ module;
 
 export module Graphics;
 
+import Model;
+import Buffer;
+
 struct PushConstants {
     glm::mat4 proj;
     glm::mat4 view;
@@ -60,62 +63,6 @@ struct SwapChainSupportDetails {
     vk::SurfaceCapabilitiesKHR capabilities;
     std::vector<vk::SurfaceFormatKHR> formats;
     std::vector<vk::PresentModeKHR> presentModes;
-};
-
-
-export class Buffer {
-public:
-    Buffer(VmaAllocator vmaAllocator, vk::BufferUsageFlags usageFlags, size_t size)
-        : allocator(vmaAllocator), size(size) {
-        vk::BufferCreateInfo bufferInfo{
-                .size = size,
-                .usage = usageFlags | vk::BufferUsageFlagBits::eTransferDst,
-        };
-
-        VkBufferCreateInfo buffInfo = static_cast<VkBufferCreateInfo>(bufferInfo);
-
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
-
-        VkBuffer buff;
-        if (vmaCreateBuffer(vmaAllocator, &buffInfo, &allocInfo, &buff, &allocation, &allocationInfo) != VK_SUCCESS)
-            throw std::runtime_error("could not allocate buffer");
-        buffer = buff;
-    }
-
-    ~Buffer() {
-        vmaDestroyBuffer(allocator, buffer, allocation);
-    }
-
-    size_t getSize() const {
-        return size;
-    }
-
-    const vk::Buffer& getHandle() const {
-        return buffer;
-    }
-
-private:
-    size_t size;
-    VmaAllocator allocator;
-    VmaAllocation allocation;
-    VmaAllocationInfo allocationInfo;
-    vk::Buffer buffer;
-
-};
-
-
-export class Model {
-public:
-    Model(std::unique_ptr<Buffer>& vertexBuff, std::unique_ptr<Buffer>& indexBuff, size_t numVertices)
-        : numVertices(numVertices) {
-        vertexBuffer = std::move(vertexBuff);
-        indexBuffer = std::move(indexBuff);
-    }
-
-    std::unique_ptr<Buffer> vertexBuffer;
-    std::unique_ptr<Buffer> indexBuffer;
-    size_t numVertices;
 };
 
 
