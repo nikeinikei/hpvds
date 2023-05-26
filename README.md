@@ -8,6 +8,7 @@ There are a few prerequisites that need to be installed for the build to work.
 - A few dependencies from [vcpk](https://github.com/microsoft/vcpkg):
 ```bash
 vcpkg install glfw3:x64-windows
+vcpkg install glm:x64-windows
 vcpkg integrate install
 ```
 

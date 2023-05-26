@@ -1,5 +1,11 @@
 #version 450
 
+layout(push_constant) uniform constants
+{
+    mat4 projMatrix;
+	mat4 viewMatrix;
+} pushConstants;
+
 layout(location = 0) out vec3 fragColor;
 
 vec2 positions[3] = vec2[](
@@ -15,6 +21,6 @@ vec3 colors[3] = vec3[](
 );
 
 void main() {
-    gl_Position = vec4(positions[gl_VertexIndex], 0, 1);
+    gl_Position = pushConstants.projMatrix * pushConstants.viewMatrix * vec4(positions[gl_VertexIndex], 0, 1);
     fragColor = colors[gl_VertexIndex];
 }

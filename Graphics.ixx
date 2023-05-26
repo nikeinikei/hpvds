@@ -1,5 +1,8 @@
 module;
 
+#define GLM_FORCE_DEFAULT_ALIGNED_GENTYPES
+#include <glm/glm.hpp>
+
 #include "shaders/fragmentShader.h"
 #include "shaders/vertexShader.h"
 
@@ -16,6 +19,11 @@ module;
 #include <iostream>
 
 export module Graphics;
+
+struct PushConstants {
+    glm::mat4 proj;
+    glm::mat4 view;
+};
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
 
@@ -525,7 +533,17 @@ void Graphics::createGraphicsPipeline() {
             .pAttachments = &colorBlendAttachment,
     };
 
-    pipelineLayout = device.createPipelineLayout({ .setLayoutCount = 0 });
+    vk::PushConstantRange pushConstantRange({
+            .stageFlags = vk::ShaderStageFlagBits::eVertex,
+            .offset = 0,
+            .size = sizeof(PushConstants),
+        });
+
+    pipelineLayout = device.createPipelineLayout({
+            .setLayoutCount = 0,
+            .pushConstantRangeCount = 1,
+            .pPushConstantRanges = &pushConstantRange,
+        });
 
     vk::PipelineRenderingCreateInfo pipelineRenderingCreateInfo{
         .colorAttachmentCount = 1,
@@ -633,6 +651,12 @@ void Graphics::recordCommandBuffer(vk::CommandBuffer cmdBuffer, uint32_t imageIn
 
     cmdBuffer.setViewport(0, viewports);
     cmdBuffer.setScissor(0, scissors);
+
+    PushConstants pushConstants{};
+    pushConstants.proj = glm::mat4(1.0f);
+    pushConstants.view = glm::mat4(1.0f);
+
+    cmdBuffer.pushConstants(pipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, sizeof(PushConstants), &pushConstants);
 
     cmdBuffer.draw(3, 1, 0, 0);
 
