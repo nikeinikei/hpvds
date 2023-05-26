@@ -7,8 +7,7 @@ There are a few prerequisites that need to be installed for the build to work.
 - [Vulkan SDK](https://vulkan.lunarg.com/sdk/home#windows)
 - A few dependencies from [vcpk](https://github.com/microsoft/vcpkg):
 ```bash
-vcpkg install glfw3:x64-windows
-vcpkg install glm:x64-windows
+vcpkg install glfw3 glm tinygltf vulkan-memory-allocator --triplet=x64-windows
 vcpkg integrate install
 ```
 

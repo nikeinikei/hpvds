@@ -10,6 +10,10 @@ module;
 #include <vulkan/vulkan.hpp>
 #include <GLFW/glfw3.h>
 
+#define VMA_IMPLEMENTATION
+#include <vma/vk_mem_alloc.h>
+
+#include <array>
 #include <limits>
 #include <optional>
 #include <map>
@@ -17,6 +21,7 @@ module;
 #include <vector>
 #include <set>
 #include <iostream>
+#include <cstring>
 
 export module Graphics;
 
@@ -57,18 +62,84 @@ struct SwapChainSupportDetails {
     std::vector<vk::PresentModeKHR> presentModes;
 };
 
+
+export class Buffer {
+public:
+    Buffer(VmaAllocator vmaAllocator, vk::BufferUsageFlags usageFlags, size_t size)
+        : allocator(vmaAllocator), size(size) {
+        vk::BufferCreateInfo bufferInfo{
+                .size = size,
+                .usage = usageFlags | vk::BufferUsageFlagBits::eTransferDst,
+        };
+
+        VkBufferCreateInfo buffInfo = static_cast<VkBufferCreateInfo>(bufferInfo);
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+
+        VkBuffer buff;
+        if (vmaCreateBuffer(vmaAllocator, &buffInfo, &allocInfo, &buff, &allocation, &allocationInfo) != VK_SUCCESS)
+            throw std::runtime_error("could not allocate buffer");
+        buffer = buff;
+    }
+
+    ~Buffer() {
+        vmaDestroyBuffer(allocator, buffer, allocation);
+    }
+
+    size_t getSize() const {
+        return size;
+    }
+
+    const vk::Buffer& getHandle() const {
+        return buffer;
+    }
+
+private:
+    size_t size;
+    VmaAllocator allocator;
+    VmaAllocation allocation;
+    VmaAllocationInfo allocationInfo;
+    vk::Buffer buffer;
+
+};
+
+
+export class Model {
+public:
+    Model(std::unique_ptr<Buffer>& vertexBuff, std::unique_ptr<Buffer>& indexBuff, size_t numVertices)
+        : numVertices(numVertices) {
+        vertexBuffer = std::move(vertexBuff);
+        indexBuffer = std::move(indexBuff);
+    }
+
+    std::unique_ptr<Buffer> vertexBuffer;
+    std::unique_ptr<Buffer> indexBuffer;
+    size_t numVertices;
+};
+
+
 export class Graphics {
 public:
     Graphics();
     ~Graphics();
 
-    void runMainLoop();
+    std::unique_ptr<Model> createModel(const std::string& path);
+
+    void pollEvents();
+    bool shouldClose();
+    void render(const std::vector<std::unique_ptr<Model>>& models);
+    void waitIdle();
 
 private:
+    std::unique_ptr<Buffer> createBuffer(vk::BufferUsageFlags usageFlags, size_t size);
+    void fillBuffer(Buffer* buffer, void* data, size_t size);
+
     void createVulkanInstance();
     static bool checkValidationSupport();
     void pickPhysicalDevice();
     void createDevice();
+    void initVma();
     void createSurface();
     void createSwapChain();
     void createImageViews();
@@ -76,8 +147,7 @@ private:
     void createCommandPool();
     void createCommandBuffers();
     void createSyncObjects();
-    void recordCommandBuffer(vk::CommandBuffer cmdBuffer, uint32_t imageIndex);
-    void drawFrame();
+    void recordCommandBuffer(vk::CommandBuffer cmdBuffer, uint32_t imageIndex, const std::vector<std::unique_ptr<Model>>& models);
     void recreateSwapChain();
     void cleanupSwapChain();
     void cleanup();
@@ -97,6 +167,7 @@ private:
     vk::Instance instance;
     vk::PhysicalDevice physicalDevice;
     vk::Device device;
+    VmaAllocator vmaAllocator;
     vk::Queue graphicsQueue;
     vk::Queue presentQueue;
     vk::SurfaceKHR surface;
@@ -128,6 +199,7 @@ Graphics::Graphics() {
         createSurface();
         pickPhysicalDevice();
         createDevice();
+        initVma();
         createSwapChain();
         createImageViews();
         createGraphicsPipeline();
@@ -271,16 +343,88 @@ QueueFamilyIndices Graphics::findQueueFamilies(vk::PhysicalDevice physDevice) {
     return indices;
 }
 
-void Graphics::runMainLoop() {
-    while (!glfwWindowShouldClose(window)) {
-        glfwPollEvents();
-        drawFrame();
-    }
+std::unique_ptr<Buffer> Graphics::createBuffer(vk::BufferUsageFlags usageFlags, size_t size) {
+    return std::make_unique<Buffer>(vmaAllocator, usageFlags, size);
+}
 
-    device.waitIdle();
+
+void Graphics::fillBuffer(Buffer* buffer, void* data, size_t size) {
+    vk::BufferCreateInfo bufferInfo{
+            .size = size,
+            .usage = vk::BufferUsageFlagBits::eTransferSrc,
+    };
+
+    VkBufferCreateInfo buffInfo = static_cast<VkBufferCreateInfo>(bufferInfo);
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+    allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+
+    VkBuffer buff;
+    VmaAllocation allocation;
+    VmaAllocationInfo allocationInfo;
+    if (vmaCreateBuffer(vmaAllocator, &buffInfo, &allocInfo, &buff, &allocation, &allocationInfo) != VK_SUCCESS)
+        throw std::runtime_error("could not allocate buffer");
+
+    std::memcpy(allocationInfo.pMappedData, data, size);
+
+    auto commandBuffers = device.allocateCommandBuffers({
+            .commandPool = commandPool,
+            .level = vk::CommandBufferLevel::ePrimary,
+            .commandBufferCount = 1,
+        });
+
+    commandBuffers.at(0).begin({
+            .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
+        });
+
+    vk::BufferCopy region{};
+    region.size = size;
+
+    commandBuffers.at(0).copyBuffer(buff, buffer->getHandle(), 1, &region);
+
+    commandBuffers.at(0).end();
+
+    vk::SubmitInfo submitInfo{};
+    submitInfo.setCommandBuffers(commandBuffers);
+
+    graphicsQueue.submit(1, &submitInfo, nullptr);
+    graphicsQueue.waitIdle();
+
+    vmaDestroyBuffer(vmaAllocator, buff, allocation);
+}
+
+
+std::unique_ptr<Model> Graphics::createModel(const std::string& /*path*/) {
+    std::array<float, 6> triangleVertices = {
+        0.0f, -0.5f,
+        0.5f, 0.5f,
+        -0.5f, 0.5f,
+    };
+
+    std::array<unsigned, 3> triangleIndices = {
+        0, 1, 2
+    };
+
+    auto vertexBuffer = createBuffer(vk::BufferUsageFlagBits::eVertexBuffer, triangleVertices.size() * sizeof(float));
+    auto indexBuffer = createBuffer(vk::BufferUsageFlagBits::eIndexBuffer, triangleIndices.size() * sizeof(unsigned));
+
+    fillBuffer(vertexBuffer.get(), triangleVertices.data(), vertexBuffer->getSize());
+    fillBuffer(indexBuffer.get(), triangleIndices.data(), indexBuffer->getSize());
+
+    return std::make_unique<Model>(vertexBuffer, indexBuffer, triangleIndices.size());
+}
+
+void Graphics::pollEvents() {
+    glfwPollEvents();
+}
+
+bool Graphics::shouldClose() {
+    return glfwWindowShouldClose(window);
 }
 
 Graphics::~Graphics() {
+    device.waitIdle();
     cleanup();
 }
 
@@ -318,6 +462,20 @@ void Graphics::createDevice() {
     device = physicalDevice.createDevice(createInfo);
     graphicsQueue = device.getQueue(indices.graphicsQueue.value(), 0);
     presentQueue = device.getQueue(indices.presentQueue.value(), 0);
+}
+
+void Graphics::initVma() {
+    auto physicalDeviceProperties = physicalDevice.getProperties();
+
+    VmaAllocatorCreateInfo allocatorCreateInfo{};
+    allocatorCreateInfo.vulkanApiVersion = physicalDeviceProperties.apiVersion;
+    allocatorCreateInfo.physicalDevice = physicalDevice;
+    allocatorCreateInfo.device = device;
+    allocatorCreateInfo.instance = instance;
+
+    if (vmaCreateAllocator(&allocatorCreateInfo, &vmaAllocator) != VK_SUCCESS) {
+        throw std::runtime_error("could not init vulkan memory allocator");
+    }
 }
 
 void Graphics::createSurface() {
@@ -478,36 +636,50 @@ void Graphics::createGraphicsPipeline() {
     auto fragmentShaderModule = device.createShaderModule(fragmentShaderCreateInfo);
 
     vk::PipelineShaderStageCreateInfo vertShaderStageInfo{
-        .stage = vk::ShaderStageFlagBits::eVertex,
+            .stage = vk::ShaderStageFlagBits::eVertex,
             .module = vertexShaderModule,
             .pName = "main",
     };
 
     vk::PipelineShaderStageCreateInfo fragmentShaderStageInfo{
-        .stage = vk::ShaderStageFlagBits::eFragment,
+            .stage = vk::ShaderStageFlagBits::eFragment,
             .module = fragmentShaderModule,
             .pName = "main",
     };
 
     vk::PipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragmentShaderStageInfo };
 
+    vk::VertexInputBindingDescription vertexInputBindingDescription {
+            .binding = 0,
+            .stride = 2 * sizeof(float),
+            .inputRate = vk::VertexInputRate::eVertex,
+    };
+
+    vk::VertexInputAttributeDescription positionAttribute {
+            .location = 0,
+            .binding = 0,
+            .format = vk::Format::eR32G32Sfloat,
+    };
+
     vk::PipelineVertexInputStateCreateInfo vertexInputInfo{
-        .vertexBindingDescriptionCount = 0,
-            .vertexAttributeDescriptionCount = 0,
+            .vertexBindingDescriptionCount = 1,
+            .pVertexBindingDescriptions = &vertexInputBindingDescription,
+            .vertexAttributeDescriptionCount = 1,
+            .pVertexAttributeDescriptions = &positionAttribute,
     };
 
     vk::PipelineInputAssemblyStateCreateInfo inputAssembly{
-        .topology = vk::PrimitiveTopology::eTriangleList,
+            .topology = vk::PrimitiveTopology::eTriangleList,
             .primitiveRestartEnable = VK_FALSE
     };
 
     vk::PipelineViewportStateCreateInfo viewportState{
-        .viewportCount = 1,
+            .viewportCount = 1,
             .scissorCount = 1,
     };
 
     vk::PipelineRasterizationStateCreateInfo rasterizer{
-        .depthClampEnable = VK_FALSE,
+            .depthClampEnable = VK_FALSE,
             .rasterizerDiscardEnable = VK_FALSE,
             .polygonMode = vk::PolygonMode::eFill,
             .cullMode = vk::CullModeFlagBits::eBack,
@@ -517,18 +689,18 @@ void Graphics::createGraphicsPipeline() {
     };
 
     vk::PipelineMultisampleStateCreateInfo multisampling{
-        .rasterizationSamples = vk::SampleCountFlagBits::e1,
+            .rasterizationSamples = vk::SampleCountFlagBits::e1,
             .sampleShadingEnable = VK_FALSE,
     };
 
     vk::PipelineColorBlendAttachmentState colorBlendAttachment{
-        .blendEnable = VK_FALSE,
+            .blendEnable = VK_FALSE,
             .colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
             vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA,
     };
 
     vk::PipelineColorBlendStateCreateInfo colorBlending{
-        .logicOpEnable = VK_FALSE,
+            .logicOpEnable = VK_FALSE,
             .attachmentCount = 1,
             .pAttachments = &colorBlendAttachment,
     };
@@ -546,7 +718,7 @@ void Graphics::createGraphicsPipeline() {
         });
 
     vk::PipelineRenderingCreateInfo pipelineRenderingCreateInfo{
-        .colorAttachmentCount = 1,
+            .colorAttachmentCount = 1,
             .pColorAttachmentFormats = &swapChainImageFormat,
     };
 
@@ -556,12 +728,12 @@ void Graphics::createGraphicsPipeline() {
     };
 
     vk::PipelineDynamicStateCreateInfo dynamicState {
-        .dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()),
+            .dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()),
             .pDynamicStates = dynamicStates.data(),
     };
 
     vk::GraphicsPipelineCreateInfo pipelineInfo{
-        .pNext = &pipelineRenderingCreateInfo,
+            .pNext = &pipelineRenderingCreateInfo,
             .stageCount = 2,
             .pStages = shaderStages,
             .pVertexInputState = &vertexInputInfo,
@@ -587,7 +759,7 @@ void Graphics::createCommandPool() {
     auto queueFamilyIndices = findQueueFamilies(physicalDevice);
 
     vk::CommandPoolCreateInfo poolInfo{
-        .flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
+            .flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
             .queueFamilyIndex = queueFamilyIndices.graphicsQueue.value(),
     };
 
@@ -602,7 +774,7 @@ void Graphics::createCommandBuffers() {
         });
 }
 
-void Graphics::recordCommandBuffer(vk::CommandBuffer cmdBuffer, uint32_t imageIndex) {
+void Graphics::recordCommandBuffer(vk::CommandBuffer cmdBuffer, uint32_t imageIndex, const std::vector<std::unique_ptr<Model>>& models) {
     vk::CommandBufferBeginInfo beginInfo{};
 
     cmdBuffer.begin(beginInfo);
@@ -652,13 +824,20 @@ void Graphics::recordCommandBuffer(vk::CommandBuffer cmdBuffer, uint32_t imageIn
     cmdBuffer.setViewport(0, viewports);
     cmdBuffer.setScissor(0, scissors);
 
-    PushConstants pushConstants{};
-    pushConstants.proj = glm::mat4(1.0f);
-    pushConstants.view = glm::mat4(1.0f);
+    for (const auto& model : models) {
+        PushConstants pushConstants{};
+        pushConstants.proj = glm::mat4(1.0f);
+        pushConstants.view = glm::mat4(1.0f);
 
-    cmdBuffer.pushConstants(pipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, sizeof(PushConstants), &pushConstants);
+        cmdBuffer.pushConstants(pipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, sizeof(PushConstants), &pushConstants);
 
-    cmdBuffer.draw(3, 1, 0, 0);
+        cmdBuffer.bindIndexBuffer(model->indexBuffer->getHandle(), 0, vk::IndexType::eUint32);
+
+        vk::DeviceSize offset = 0;
+        cmdBuffer.bindVertexBuffers(0, 1, &model->vertexBuffer->getHandle(), &offset);
+
+        cmdBuffer.draw(model->numVertices, 1, 0, 0);
+    }
 
     cmdBuffer.endRendering();
 
@@ -668,7 +847,7 @@ void Graphics::recordCommandBuffer(vk::CommandBuffer cmdBuffer, uint32_t imageIn
     cmdBuffer.end();
 }
 
-void Graphics::drawFrame() {
+void Graphics::render(const std::vector<std::unique_ptr<Model>>& models) {
     if (device.waitForFences(1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX) != vk::Result::eSuccess) {
         throw std::runtime_error("could not wait for fences");
     }
@@ -693,7 +872,7 @@ void Graphics::drawFrame() {
     }
 
     commandBuffers[currentFrame].reset();
-    recordCommandBuffer(commandBuffers[currentFrame], imageIndex);
+    recordCommandBuffer(commandBuffers[currentFrame], imageIndex, models);
 
     vk::Semaphore waitSemaphores[] = { imageAvailableSemaphores[currentFrame] };
     vk::PipelineStageFlags waitStages[] = { vk::PipelineStageFlagBits::eColorAttachmentOutput };
@@ -740,6 +919,10 @@ void Graphics::drawFrame() {
     currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
+void Graphics::waitIdle() {
+    device.waitIdle();
+}
+
 void Graphics::recreateSwapChain() {
     cleanupSwapChain();
 
@@ -780,6 +963,8 @@ void Graphics::cleanup() {
 
     device.destroy(graphicsPipeline);
     device.destroy(pipelineLayout);
+
+    vmaDestroyAllocator(vmaAllocator);
 
     vkDestroySurfaceKHR(instance, surface, nullptr);
     device.destroy();
