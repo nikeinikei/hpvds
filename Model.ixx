@@ -1,7 +1,6 @@
 module;
 
-#define GLM_FORCE_DEFAULT_ALIGNED_GENTYPES
-#include <glm/glm.hpp>
+#include "glm_config.h"
 
 #include <memory>
 

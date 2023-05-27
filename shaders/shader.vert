@@ -1,6 +1,6 @@
 #version 450
 
-layout(location = 0) in vec2 pos;
+layout(location = 0) in vec3 pos;
 
 layout(push_constant) uniform constants
 {
@@ -8,10 +8,10 @@ layout(push_constant) uniform constants
 } pushConstants;
 
 layout(binding = 0) uniform UniformBufferObject {
-    mat4 view;
     mat4 proj;
+    mat4 view;
 } ubo;
 
 void main() {
-    gl_Position = ubo.proj * ubo.view * pushConstants.modelTransformation * vec4(pos, 0, 1);
+    gl_Position = ubo.proj * ubo.view * pushConstants.modelTransformation * vec4(pos, 1.0);
 }

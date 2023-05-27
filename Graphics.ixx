@@ -1,8 +1,6 @@
 module;
 
-#define GLM_FORCE_DEFAULT_ALIGNED_GENTYPES
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
+#include "glm_config.h"
 
 #include "shaders/fragmentShader.h"
 #include "shaders/vertexShader.h"
@@ -376,23 +374,28 @@ void Graphics::fillBuffer(Buffer* buffer, void* data, size_t size) {
 
 
 std::unique_ptr<Model> Graphics::createModel(const std::string& /*path*/) {
-    std::array<float, 6> triangleVertices = {
-        0.0f, -0.5f,
-        0.5f, 0.5f,
-        -0.5f, 0.5f,
+    std::vector<float> vertices = {
+        -1.0f, -1.0f,  1.0f,
+         1.0f, -1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,
+        -1.0f,  1.0f,  1.0f,
+        -1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,
+         1.0f,  1.0f, -1.0f,
+        -1.0f,  1.0f, -1.0f,
     };
 
-    std::array<unsigned, 3> triangleIndices = {
-        0, 1, 2
+    std::vector<uint32_t> indices = {
+        0,1,2, 2,3,0, 1,5,6, 6,2,1, 7,6,5, 5,4,7, 4,0,3, 3,7,4, 4,5,1, 1,0,4, 3,2,6, 6,7,3,
     };
 
-    auto vertexBuffer = createBuffer(vk::BufferUsageFlagBits::eVertexBuffer, triangleVertices.size() * sizeof(float));
-    auto indexBuffer = createBuffer(vk::BufferUsageFlagBits::eIndexBuffer, triangleIndices.size() * sizeof(unsigned));
+    auto vertexBuffer = createBuffer(vk::BufferUsageFlagBits::eVertexBuffer, vertices.size() * sizeof(float));
+    auto indexBuffer = createBuffer(vk::BufferUsageFlagBits::eIndexBuffer, indices.size() * sizeof(uint32_t));
 
-    fillBuffer(vertexBuffer.get(), triangleVertices.data(), vertexBuffer->getSize());
-    fillBuffer(indexBuffer.get(), triangleIndices.data(), indexBuffer->getSize());
+    fillBuffer(vertexBuffer.get(), vertices.data(), vertexBuffer->getSize() * sizeof(float));
+    fillBuffer(indexBuffer.get(), indices.data(), indexBuffer->getSize() * sizeof(uint32_t));
 
-    return std::make_unique<Model>(vertexBuffer, indexBuffer, triangleIndices.size());
+    return std::make_unique<Model>(vertexBuffer, indexBuffer, indices.size());
 }
 
 void Graphics::pollEvents() {
@@ -647,14 +650,14 @@ void Graphics::createGraphicsPipeline() {
 
     vk::VertexInputBindingDescription vertexInputBindingDescription {
             .binding = 0,
-            .stride = 2 * sizeof(float),
+            .stride = 3 * sizeof(float),
             .inputRate = vk::VertexInputRate::eVertex,
     };
 
     vk::VertexInputAttributeDescription positionAttribute {
             .location = 0,
             .binding = 0,
-            .format = vk::Format::eR32G32Sfloat,
+            .format = vk::Format::eR32G32B32Sfloat,
     };
 
     vk::PipelineVertexInputStateCreateInfo vertexInputInfo{
@@ -677,8 +680,8 @@ void Graphics::createGraphicsPipeline() {
     vk::PipelineRasterizationStateCreateInfo rasterizer{
             .depthClampEnable = VK_FALSE,
             .rasterizerDiscardEnable = VK_FALSE,
-            .polygonMode = vk::PolygonMode::eFill,
-            .cullMode = vk::CullModeFlagBits::eBack,
+            .polygonMode = vk::PolygonMode::eLine,
+            .cullMode = vk::CullModeFlagBits::eFront,
             .frontFace = vk::FrontFace::eClockwise,
             .depthBiasEnable = VK_FALSE,
             .lineWidth = 1.0f,
@@ -820,16 +823,19 @@ void Graphics::recordCommandBuffer(vk::CommandBuffer cmdBuffer, uint32_t imageIn
 
     cmdBuffer.setScissor(0, 1, &scissor);
 
+    const auto elapsed = timer->elapsed();
+
     UniformBufferObject ubo{};
     ubo.proj = camera->getProjection();
-    ubo.view = glm::rotate(glm::mat4(1.0f), timer->elapsed(), glm::vec3(0.0f, 0.0f, 1.0f));
+    ubo.proj[1][1] *= -1;
+    ubo.view = camera->getView();
     std::memcpy(mappedUniforms[currentFrame], &ubo, sizeof(ubo));
 
     cmdBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipelineLayout, 0, 1, &descriptorSets.at(currentFrame), 0, nullptr);
 
     for (const auto& model : models) {
         PushConstants pushConstants{};
-        pushConstants.model = model->modelTransformation;
+        pushConstants.model = glm::rotate(glm::mat4(1.0f), elapsed * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 
         cmdBuffer.pushConstants(pipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, sizeof(PushConstants), &pushConstants);
 
@@ -838,7 +844,7 @@ void Graphics::recordCommandBuffer(vk::CommandBuffer cmdBuffer, uint32_t imageIn
         vk::DeviceSize offset = 0;
         cmdBuffer.bindVertexBuffers(0, 1, &model->vertexBuffer->getHandle(), &offset);
 
-        cmdBuffer.draw(model->numVertices, 1, 0, 0);
+        cmdBuffer.drawIndexed(model->numVertices, 1, 0, 0, 0);
     }
 
     cmdBuffer.endRendering();
@@ -1051,9 +1057,8 @@ void Graphics::createDescriptorSets() {
 }
 
 void Graphics::createCamera() {
-    camera = std::make_unique<Camera>();
+    camera = std::make_unique<Camera>(static_cast<float>(swapChainExtent.width) / static_cast<float>(swapChainExtent.height));
 }
-
 
 void Graphics::createTimer() {
     timer = std::make_unique<Timer>();
