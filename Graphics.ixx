@@ -115,7 +115,7 @@ private:
     void createDescriptorSets();
     void createCamera();
     void createTimer();
-    void recordCommandBuffer(vk::CommandBuffer cmdBuffer, uint32_t imageIndex, const std::vector<std::unique_ptr<Model>>& models);
+    void recordCommandBuffer(vk::CommandBuffer cmdBuffer, uint32_t imageIndex, const std::vector<std::unique_ptr<Model>>& models, float dt);
     void recreateSwapChain();
     void cleanupSwapChain();
     void cleanup();
@@ -809,7 +809,7 @@ void Graphics::createCommandBuffers() {
         });
 }
 
-void Graphics::recordCommandBuffer(vk::CommandBuffer cmdBuffer, uint32_t imageIndex, const std::vector<std::unique_ptr<Model>>& models) {
+void Graphics::recordCommandBuffer(vk::CommandBuffer cmdBuffer, uint32_t imageIndex, const std::vector<std::unique_ptr<Model>>& models, float dt) {
     vk::CommandBufferBeginInfo beginInfo{};
 
     cmdBuffer.begin(beginInfo);
@@ -861,6 +861,8 @@ void Graphics::recordCommandBuffer(vk::CommandBuffer cmdBuffer, uint32_t imageIn
 
     const auto elapsed = timer->elapsed();
 
+    camera->update(dt);
+
     UniformBufferObject ubo{};
     ubo.proj = camera->getProjection();
     ubo.proj[1][1] *= -1;
@@ -871,7 +873,7 @@ void Graphics::recordCommandBuffer(vk::CommandBuffer cmdBuffer, uint32_t imageIn
 
     for (const auto& model : models) {
         PushConstants pushConstants{};
-        pushConstants.model = glm::rotate(glm::mat4(1.0f), elapsed * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        pushConstants.model = glm::rotate(glm::mat4(1.0f), elapsed * glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
         pushConstants.color.r = model->color.r;
         pushConstants.color.g = model->color.g;
         pushConstants.color.b = model->color.b;
@@ -896,7 +898,7 @@ void Graphics::recordCommandBuffer(vk::CommandBuffer cmdBuffer, uint32_t imageIn
 }
 
 void Graphics::render(const std::vector<std::unique_ptr<Model>>& models) {
-    timer->tick();
+    float dt = timer->tick();
 
     if (device.waitForFences(1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX) != vk::Result::eSuccess) {
         throw std::runtime_error("could not wait for fences");
@@ -922,7 +924,7 @@ void Graphics::render(const std::vector<std::unique_ptr<Model>>& models) {
     }
 
     commandBuffers[currentFrame].reset();
-    recordCommandBuffer(commandBuffers[currentFrame], imageIndex, models);
+    recordCommandBuffer(commandBuffers[currentFrame], imageIndex, models, dt);
 
     vk::Semaphore waitSemaphores[] = { imageAvailableSemaphores[currentFrame] };
     vk::PipelineStageFlags waitStages[] = { vk::PipelineStageFlagBits::eColorAttachmentOutput };
@@ -1097,7 +1099,7 @@ void Graphics::createDescriptorSets() {
 }
 
 void Graphics::createCamera() {
-    camera = std::make_unique<Camera>(static_cast<float>(swapChainExtent.width) / static_cast<float>(swapChainExtent.height));
+    camera = std::make_unique<Camera>(window, static_cast<float>(swapChainExtent.width) / static_cast<float>(swapChainExtent.height));
 }
 
 void Graphics::createTimer() {
