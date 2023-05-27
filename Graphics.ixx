@@ -13,6 +13,7 @@ module;
 #include <vk_mem_alloc.h>
 
 #define TINYGLTF_IMPLEMENTATION
+#define __STDC_LIB_EXT1__
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define TINYGLTF_NOEXCEPTION
