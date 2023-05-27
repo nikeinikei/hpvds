@@ -11,7 +11,7 @@ int main() {
 
         std::vector<std::unique_ptr<Model>> models;
 
-        models.push_back(std::move(graphics->createModel("")));
+        models.push_back(std::move(graphics->createModel("resources/cube.glb")));
 
         while (!graphics->shouldClose()) {
             graphics->pollEvents();

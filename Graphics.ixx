@@ -12,6 +12,12 @@ module;
 #define VMA_IMPLEMENTATION
 #include <vk_mem_alloc.h>
 
+#define TINYGLTF_IMPLEMENTATION
+#define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#define TINYGLTF_NOEXCEPTION
+#include "tiny_gltf.h"
+
 #include <array>
 #include <limits>
 #include <optional>
@@ -373,29 +379,38 @@ void Graphics::fillBuffer(Buffer* buffer, void* data, size_t size) {
 }
 
 
-std::unique_ptr<Model> Graphics::createModel(const std::string& /*path*/) {
-    std::vector<float> vertices = {
-        -1.0f, -1.0f,  1.0f,
-         1.0f, -1.0f,  1.0f,
-         1.0f,  1.0f,  1.0f,
-        -1.0f,  1.0f,  1.0f,
-        -1.0f, -1.0f, -1.0f,
-         1.0f, -1.0f, -1.0f,
-         1.0f,  1.0f, -1.0f,
-        -1.0f,  1.0f, -1.0f,
-    };
+std::unique_ptr<Model> Graphics::createModel(const std::string& path) {
+    tinygltf::Model model;
+    tinygltf::TinyGLTF loader;
+    std::string err;
+    std::string warn;
 
-    std::vector<uint32_t> indices = {
-        0,1,2, 2,3,0, 1,5,6, 6,2,1, 7,6,5, 5,4,7, 4,0,3, 3,7,4, 4,5,1, 1,0,4, 3,2,6, 6,7,3,
-    };
+    bool res = loader.LoadBinaryFromFile(&model, &err, &warn, path.c_str());
+    if (!warn.empty()) {
+        std::cout << "WARN: " << warn << std::endl;
+    }
 
-    auto vertexBuffer = createBuffer(vk::BufferUsageFlagBits::eVertexBuffer, vertices.size() * sizeof(float));
-    auto indexBuffer = createBuffer(vk::BufferUsageFlagBits::eIndexBuffer, indices.size() * sizeof(uint32_t));
+    if (!err.empty()) {
+        std::cout << "ERR: " << err << std::endl;
+    }
 
-    fillBuffer(vertexBuffer.get(), vertices.data(), vertexBuffer->getSize() * sizeof(float));
-    fillBuffer(indexBuffer.get(), indices.data(), indexBuffer->getSize() * sizeof(uint32_t));
+    if (!res) {
+        std::cout << "failed to load gltf: " << path << std::endl;
+    }
+    else {
+        std::cout << "loaded gltf: " << path << std::endl;
+    }
 
-    return std::make_unique<Model>(vertexBuffer, indexBuffer, indices.size());
+    constexpr unsigned PositionIndex = 0;
+    constexpr unsigned IndicesIndex = 3;
+
+    auto vertexBuffer = createBuffer(vk::BufferUsageFlagBits::eVertexBuffer, model.bufferViews[PositionIndex].byteLength);
+    auto indexBuffer = createBuffer(vk::BufferUsageFlagBits::eIndexBuffer, model.bufferViews[IndicesIndex].byteLength);
+
+    fillBuffer(vertexBuffer.get(), model.buffers[model.bufferViews[PositionIndex].buffer].data.data() + model.bufferViews[PositionIndex].byteOffset, vertexBuffer->getSize());
+    fillBuffer(indexBuffer.get(), model.buffers[model.bufferViews[IndicesIndex].buffer].data.data() + model.bufferViews[IndicesIndex].byteOffset, indexBuffer->getSize());
+
+    return std::make_unique<Model>(vertexBuffer, indexBuffer, model.accessors[IndicesIndex].count);
 }
 
 void Graphics::pollEvents() {
@@ -680,7 +695,7 @@ void Graphics::createGraphicsPipeline() {
     vk::PipelineRasterizationStateCreateInfo rasterizer{
             .depthClampEnable = VK_FALSE,
             .rasterizerDiscardEnable = VK_FALSE,
-            .polygonMode = vk::PolygonMode::eLine,
+            .polygonMode = vk::PolygonMode::eFill,
             .cullMode = vk::CullModeFlagBits::eFront,
             .frontFace = vk::FrontFace::eClockwise,
             .depthBiasEnable = VK_FALSE,
@@ -839,7 +854,7 @@ void Graphics::recordCommandBuffer(vk::CommandBuffer cmdBuffer, uint32_t imageIn
 
         cmdBuffer.pushConstants(pipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, sizeof(PushConstants), &pushConstants);
 
-        cmdBuffer.bindIndexBuffer(model->indexBuffer->getHandle(), 0, vk::IndexType::eUint32);
+        cmdBuffer.bindIndexBuffer(model->indexBuffer->getHandle(), 0, vk::IndexType::eUint16);
 
         vk::DeviceSize offset = 0;
         cmdBuffer.bindVertexBuffers(0, 1, &model->vertexBuffer->getHandle(), &offset);
