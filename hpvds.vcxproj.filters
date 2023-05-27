@@ -27,5 +27,14 @@
     <ClCompile Include="Model.ixx">
       <Filter>Quelldateien</Filter>
     </ClCompile>
+    <ClCompile Include="Camera.ixx">
+      <Filter>Quelldateien</Filter>
+    </ClCompile>
+    <ClCompile Include="StreamBuffer.ixx">
+      <Filter>Quelldateien</Filter>
+    </ClCompile>
+    <ClCompile Include="Timer.ixx">
+      <Filter>Quelldateien</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

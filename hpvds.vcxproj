@@ -136,9 +136,12 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Buffer.ixx" />
+    <ClCompile Include="Camera.ixx" />
     <ClCompile Include="Graphics.ixx" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="Model.ixx" />
+    <ClCompile Include="StreamBuffer.ixx" />
+    <ClCompile Include="Timer.ixx" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

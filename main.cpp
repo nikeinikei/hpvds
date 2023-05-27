@@ -2,6 +2,7 @@
 #include <iostream>
 
 import Graphics;
+import Timer;
 
 
 int main() {
