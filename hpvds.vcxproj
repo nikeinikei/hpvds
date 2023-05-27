@@ -137,6 +137,7 @@
   <ItemGroup>
     <ClCompile Include="Buffer.ixx" />
     <ClCompile Include="Camera.ixx" />
+    <ClCompile Include="Color.ixx" />
     <ClCompile Include="Graphics.ixx" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="Model.ixx" />

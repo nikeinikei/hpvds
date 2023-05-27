@@ -12,6 +12,7 @@ int main() {
         std::vector<std::unique_ptr<Model>> models;
 
         models.push_back(std::move(graphics->createModel("resources/cube.glb")));
+        models[0]->color = Color3(0.1647058823529412f, 0.3137254901960784f, 0.7450980392156863f);
 
         while (!graphics->shouldClose()) {
             graphics->pollEvents();

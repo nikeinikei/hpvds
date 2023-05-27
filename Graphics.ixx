@@ -45,6 +45,7 @@ struct UniformBufferObject {
 
 struct PushConstants {
     glm::mat4 model;
+    glm::vec3 color;
 };
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
@@ -403,15 +404,18 @@ std::unique_ptr<Model> Graphics::createModel(const std::string& path) {
     }
 
     constexpr unsigned PositionIndex = 0;
+    constexpr unsigned NormalIndex = 2;
     constexpr unsigned IndicesIndex = 3;
 
     auto vertexBuffer = createBuffer(vk::BufferUsageFlagBits::eVertexBuffer, model.bufferViews[PositionIndex].byteLength);
+    auto normalBuffer = createBuffer(vk::BufferUsageFlagBits::eVertexBuffer, model.bufferViews[NormalIndex].byteLength);
     auto indexBuffer = createBuffer(vk::BufferUsageFlagBits::eIndexBuffer, model.bufferViews[IndicesIndex].byteLength);
 
     fillBuffer(vertexBuffer.get(), model.buffers[model.bufferViews[PositionIndex].buffer].data.data() + model.bufferViews[PositionIndex].byteOffset, vertexBuffer->getSize());
+    fillBuffer(normalBuffer.get(), model.buffers[model.bufferViews[NormalIndex].buffer].data.data() + model.bufferViews[NormalIndex].byteOffset, normalBuffer->getSize());
     fillBuffer(indexBuffer.get(), model.buffers[model.bufferViews[IndicesIndex].buffer].data.data() + model.bufferViews[IndicesIndex].byteOffset, indexBuffer->getSize());
 
-    return std::make_unique<Model>(vertexBuffer, indexBuffer, model.accessors[IndicesIndex].count);
+    return std::make_unique<Model>(vertexBuffer, normalBuffer, indexBuffer, model.accessors[IndicesIndex].count);
 }
 
 void Graphics::pollEvents() {
@@ -670,17 +674,33 @@ void Graphics::createGraphicsPipeline() {
             .inputRate = vk::VertexInputRate::eVertex,
     };
 
+    vk::VertexInputBindingDescription normalInputBindingDescription {
+            .binding = 1,
+            .stride = 3 * sizeof(float),
+            .inputRate = vk::VertexInputRate::eVertex,
+    };
+
+    std::array<vk::VertexInputBindingDescription, 2> bindings = { vertexInputBindingDescription, normalInputBindingDescription };
+
     vk::VertexInputAttributeDescription positionAttribute {
             .location = 0,
             .binding = 0,
             .format = vk::Format::eR32G32B32Sfloat,
     };
 
+    vk::VertexInputAttributeDescription normalAttribute {
+            .location = 2,
+            .binding = 1,
+            .format = vk::Format::eR32G32B32Sfloat,
+    };
+
+    std::array<vk::VertexInputAttributeDescription, 2> attributes = { positionAttribute, normalAttribute };
+
     vk::PipelineVertexInputStateCreateInfo vertexInputInfo{
-            .vertexBindingDescriptionCount = 1,
-            .pVertexBindingDescriptions = &vertexInputBindingDescription,
-            .vertexAttributeDescriptionCount = 1,
-            .pVertexAttributeDescriptions = &positionAttribute,
+            .vertexBindingDescriptionCount = bindings.size(),
+            .pVertexBindingDescriptions = bindings.data(),
+            .vertexAttributeDescriptionCount = attributes.size(),
+            .pVertexAttributeDescriptions = attributes.data(),
     };
 
     vk::PipelineInputAssemblyStateCreateInfo inputAssembly{
@@ -852,13 +872,17 @@ void Graphics::recordCommandBuffer(vk::CommandBuffer cmdBuffer, uint32_t imageIn
     for (const auto& model : models) {
         PushConstants pushConstants{};
         pushConstants.model = glm::rotate(glm::mat4(1.0f), elapsed * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        pushConstants.color.r = model->color.r;
+        pushConstants.color.g = model->color.g;
+        pushConstants.color.b = model->color.b;
 
         cmdBuffer.pushConstants(pipelineLayout, vk::ShaderStageFlagBits::eVertex, 0, sizeof(PushConstants), &pushConstants);
 
         cmdBuffer.bindIndexBuffer(model->indexBuffer->getHandle(), 0, vk::IndexType::eUint16);
 
-        vk::DeviceSize offset = 0;
-        cmdBuffer.bindVertexBuffers(0, 1, &model->vertexBuffer->getHandle(), &offset);
+        std::array<vk::Buffer, 2> vertexBuffers = { model->vertexBuffer->getHandle(), model->normalBuffer->getHandle() };
+        std::array<vk::DeviceSize, 2> offsets = { 0, 0 };
+        cmdBuffer.bindVertexBuffers(0, vertexBuffers, offsets);
 
         cmdBuffer.drawIndexed(model->numVertices, 1, 0, 0, 0);
     }
